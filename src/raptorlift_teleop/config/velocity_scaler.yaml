@@ -1,0 +1,24 @@
+# velocity_scaler configuration for RaptorLift
+# Applies gear-based velocity scaling
+
+velocity_scaler:
+  ros__parameters:
+    # Gear-based velocity limits
+    min_linear_vel: 0.1       # Velocity at gear 1 (m/s)
+    max_linear_vel: 2.0       # Velocity at gear 20 (m/s)
+    max_angular_vel: 1.0      # Maximum angular velocity (rad/s)
+
+    # Gear settings
+    num_gears: 20             # Total number of gears
+    default_gear: 10          # Default gear if no gear_state received
+
+    # Input normalization (expected max values from twist_mux)
+    input_max_linear: 1.0     # Input is normalized [-1, 1]
+    input_max_angular: 1.0    # Input is normalized [-1, 1]
+
+    # Timing
+    publish_rate: 50.0        # Hz
+    cmd_timeout: 0.5          # Timeout for cmd_vel input (seconds)
+
+    # Frame
+    frame_id: "base_link"

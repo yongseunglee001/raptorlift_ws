@@ -1,0 +1,76 @@
+###############################################################################
+# RaptorLift Hardware Bridge Configuration
+###############################################################################
+
+hardware_bridge:
+  ros__parameters:
+    # ── Operating Mode ─────────────────────────────────────────────────────
+    #   true  = Virtual PLC simulator (no hardware required)
+    #   false = Real Mitsubishi servos via Modbus TCP
+    simulation_mode: true
+
+    # ── Control Loop ───────────────────────────────────────────────────────
+    control_rate: 100.0           # Hz
+    detailed_logging: false
+
+    # ── ROS Topics ─────────────────────────────────────────────────────────
+    topics:
+      joint_commands: "/raptorlift/joint_commands"
+      joint_states:   "/raptorlift/joint_states"
+
+    # ── Joint Definitions (axis order: FR=0, FL=1, RR=2, RL=3) ─────────
+    #   Traction = velocity → torque control (front wheels)
+    #   Steering = position → torque control (rear wheels)
+    traction_joints:
+      - "front_right_wheel_joint"
+      - "front_left_wheel_joint"
+
+    steering_joints:
+      - "rear_right_steering_joint"
+      - "rear_left_steering_joint"
+
+    # ── PID Gains: Steering (Position Control) ─────────────────────────────
+    steering_kp: 50.0
+    steering_ki: 0.0
+    steering_kd: 5.0
+    max_steering_torque: 100.0    # Nm
+
+    # ── PID Gains: Traction (Velocity Control) ─────────────────────────────
+    traction_kp: 10.0
+    traction_ki: 5.0
+    traction_kd: 0.0
+    max_traction_torque: 150.0    # Nm
+
+    # ── Virtual PLC Simulator ──────────────────────────────────────────────
+    simulation:
+      wheel_radius: 0.1715        # meters
+      max_steering_angle: 0.7     # rad (~40 deg)
+      steering_time_constant: 0.1 # seconds
+      traction_time_constant: 0.05
+
+    # ── Communication Watchdog (Compy Pattern) ─────────────────────────────
+    comm_timeout: 1.0             # seconds - triggers e-stop if no PLC response
+    reconnect_interval: 5.0       # seconds - delay between reconnect attempts
+
+    # ── Modbus TCP (Real Hardware) ─────────────────────────────────────────
+    modbus_ip: "192.168.2.1"
+    modbus_port: 502
+    modbus_slave_id: 1
+    modbus_timeout_us: 500000     # microseconds (500 ms)
+
+    # ── PLC Coil Map (matches axis order FR=0, FL=1, RR=2, RL=3) ────────
+    #   M0 = PLC reset pulse (auto on connect: high → 10ms → low)
+    #   M1 = FR (Front Right Traction) motor enable
+    #   M2 = FL (Front Left Traction) motor enable
+    #   M3 = RR (Rear Right Steering) motor enable
+    #   M4 = RL (Rear Left Steering) motor enable
+    #
+    # ── PLC Register Map ──────────────────────────────────────────────────
+    #   Command (D0-D15, write): 4 regs/axis × 4 axes
+    #     Axis 0 (FR): D0,D1=speed_limit  D2,D3=target_torque
+    #     Axis 1 (FL): D4,D5=speed_limit  D6,D7=target_torque
+    #     Axis 2 (RR): D8,D9=target_pos   D10,D11=target_torque
+    #     Axis 3 (RL): D12,D13=target_pos  D14,D15=target_torque
+    #   Feedback (D16-D23, read): 2 regs/axis × 4 axes
+    #     D16,D17=FR rotation_speed  D18,D19=FL rotation_speed
+    #     D20,D21=RR actual_pos      D22,D23=RL actual_pos

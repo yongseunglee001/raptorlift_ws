@@ -1,0 +1,75 @@
+# RaptorLift Controller Configuration
+#
+# 4-Axis Convention (FR=0, FL=1, RR=2, RL=3):
+#   - Traction (Front): front_right_wheel_joint, front_left_wheel_joint
+#   - Steering (Rear):  rear_right_steering_joint, rear_left_steering_joint
+#
+# Note: This is a rear-wheel steering Ackermann forklift robot.
+
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    ackermann_steering_controller:
+      type: ackermann_steering_controller/AckermannSteeringController
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_sim_time: false
+
+ackermann_steering_controller:
+  ros__parameters:
+    # Reference timeout (stop if no command received)
+    reference_timeout: 0.5  # seconds
+
+    # Open loop mode (no feedback required)
+    open_loop: false
+
+    # Traction joints (velocity command) - front wheels [RIGHT, LEFT]
+    traction_joints_names:
+      - front_right_wheel_joint
+      - front_left_wheel_joint
+
+    # Steering joints (position command) - rear wheels [RIGHT, LEFT]
+    steering_joints_names:
+      - rear_right_steering_joint
+      - rear_left_steering_joint
+
+    # Geometry parameters (meters)
+    wheelbase: 1.0                    # Distance between front and rear axles
+    traction_wheels_radius: 0.1715    # Traction wheel radius (front wheels)
+    traction_track_width: 0.71        # Distance between left and right traction wheels
+    steering_track_width: 0.71        # Distance between left and right steering wheels
+
+    # Velocity limits
+    linear:
+      x:
+        has_velocity_limits: true
+        max_velocity: 1.0        # m/s
+        min_velocity: -1.0       # m/s
+        has_acceleration_limits: true
+        max_acceleration: 2.0    # m/s^2
+        min_acceleration: -2.0   # m/s^2
+
+    angular:
+      z:
+        has_velocity_limits: true
+        max_velocity: 1.0        # rad/s
+        min_velocity: -1.0       # rad/s
+        has_acceleration_limits: true
+        max_acceleration: 2.0    # rad/s^2
+        min_acceleration: -2.0   # rad/s^2
+
+    # Odometry
+    enable_odom_tf: true
+    odom_frame_id: odom
+    base_frame_id: base_link
+    pose_covariance_diagonal: [0.001, 0.001, 0.001, 0.001, 0.001, 0.01]
+    twist_covariance_diagonal: [0.001, 0.001, 0.001, 0.001, 0.001, 0.01]
+
+    # Feedback
+    position_feedback: false
+    velocity_feedback: true

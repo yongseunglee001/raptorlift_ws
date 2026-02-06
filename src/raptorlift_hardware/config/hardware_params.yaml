@@ -1,0 +1,28 @@
+# RaptorLift Hardware Parameters
+#
+# These parameters are loaded via URDF <ros2_control> hardware_parameters.
+# This file serves as a reference and for alternative loading methods.
+
+raptorlift_hardware:
+  # PID gains for steering joints (Position -> Torque)
+  steering_kp: 50.0
+  steering_ki: 0.0
+  steering_kd: 5.0
+
+  # PID gains for traction joints (Velocity -> Torque)
+  traction_kp: 10.0
+  traction_ki: 5.0
+  traction_kd: 0.0
+
+  # Torque limits (Nm)
+  max_steering_torque: 100.0
+  max_traction_torque: 150.0
+
+  # Simulation mode (true for testing, false for real hardware)
+  simulation_mode: true
+
+  # Simulation dynamics parameters
+  steering_inertia: 0.5   # kg*m^2
+  traction_inertia: 0.08  # kg*m^2 (wheel moment of inertia)
+  steering_damping: 0.5   # Nm*s/rad
+  traction_damping: 1.0   # Nm*s/rad

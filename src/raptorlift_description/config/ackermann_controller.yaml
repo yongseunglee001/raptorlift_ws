@@ -1,0 +1,64 @@
+# Raptor Lift - Ackermann Steering Controller Configuration
+#
+# Layout:
+#   Front (Fork side, +X) = Traction wheels (구동륜)
+#   Rear (Counterweight side, -X) = Steering wheels (조향륜)
+#
+# cmd_vel behavior:
+#   linear.x > 0 = Forward (fork direction)
+#   angular.z > 0 = Counter-clockwise (left turn)
+
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    ackermann_steering_controller:
+      type: ackermann_steering_controller/AckermannSteeringController
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+ackermann_steering_controller:
+  ros__parameters:
+    # Front wheels = Traction (구동륜 - 포크 쪽)
+    traction_joints_names:
+      - front_right_wheel_joint
+      - front_left_wheel_joint
+
+    # Rear wheels = Steering (조향륜 - 카운터웨이트 쪽)
+    steering_joints_names:
+      - rear_right_steering_joint
+      - rear_left_steering_joint
+
+    # Geometry
+    wheelbase: 1.0               # front-rear 축간 거리 [m] (0.47765 + 0.52235)
+    traction_track_width: 0.71   # 구동륜 좌우 간격 [m] (0.355 * 2)
+    steering_track_width: 0.71   # 조향륜 좌우 간격 [m]
+    traction_wheels_radius: 0.1715  # 바퀴 반경 [m]
+
+    # Frames
+    base_frame_id: base_link
+    odom_frame_id: odom
+
+    # Odometry
+    enable_odom_tf: true
+    position_feedback: false     # velocity feedback 사용
+    open_loop: false
+
+    # Velocity limits
+    linear:
+      x:
+        has_velocity_limits: true
+        max_velocity: 1.0        # m/s
+        has_acceleration_limits: true
+        max_acceleration: 2.0    # m/s^2
+    angular:
+      z:
+        has_velocity_limits: true
+        max_velocity: 1.0        # rad/s
+        has_acceleration_limits: true
+        max_acceleration: 2.0    # rad/s^2
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false

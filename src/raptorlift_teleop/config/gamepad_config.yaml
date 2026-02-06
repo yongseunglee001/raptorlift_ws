@@ -1,0 +1,24 @@
+gamepad_teleop:
+  ros__parameters:
+    # Velocity limits
+    min_linear_vel: 0.05      # Minimum linear velocity (m/s) at gear 1
+    max_linear_vel: 1.0       # Maximum linear velocity (m/s) at max gear
+    max_angular_vel: 0.5      # Maximum angular velocity (rad/s)
+
+    # Control settings
+    deadzone: 0.1             # Joystick deadzone (0.0 - 1.0)
+    num_gears: 20             # Number of gear steps
+    publish_rate: 50.0        # Publishing frequency (Hz)
+    joy_timeout: 0.5          # Joy message timeout before stopping (seconds)
+
+    # Frame settings
+    frame_id: "base_link"     # Frame ID for TwistStamped messages
+
+joy_node:
+  ros__parameters:
+    device_id: 0              # Joystick device ID (js0)
+    device_name: ""           # Device name (empty = use device_id)
+    deadzone: 0.05            # Joystick deadzone
+    autorepeat_rate: 20.0     # Repeat rate when button held (Hz)
+    sticky_buttons: false     # Toggle mode for buttons
+    coalesce_interval_ms: 1   # Coalesce interval for events

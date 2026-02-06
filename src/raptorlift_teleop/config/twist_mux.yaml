@@ -1,0 +1,25 @@
+# twist_mux configuration for RaptorLift
+# Priority: higher number = higher priority
+
+twist_mux:
+  ros__parameters:
+    use_stamped: true   # Use geometry_msgs/TwistStamped (unified stamped type)
+
+    topics:
+      # Gamepad teleop - highest priority
+      gamepad:
+        topic: /teleop/cmd_vel
+        timeout: 0.5
+        priority: 100
+
+      # Keyboard teleop - medium priority
+      keyboard:
+        topic: /key/cmd_vel
+        timeout: 0.5
+        priority: 50
+
+      # Navigation (Nav2) - lowest priority
+      navigation:
+        topic: /nav/cmd_vel
+        timeout: 0.5
+        priority: 10

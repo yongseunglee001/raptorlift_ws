@@ -1,0 +1,11 @@
+<library path="raptorlift_hardware">
+  <class name="raptorlift_hardware/RaptorLiftHardware"
+         type="raptorlift_hardware::RaptorLiftHardware"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      RaptorLift hardware interface for Ackermann steering forklift.
+      Supports rear-wheel steering (position command) and front-wheel traction (velocity command).
+      Converts position/velocity commands to torque for Mitsubishi servos in torque mode.
+    </description>
+  </class>
+</library>
