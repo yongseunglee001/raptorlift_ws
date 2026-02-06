@@ -86,6 +86,11 @@ def generate_launch_description():
             default_value="100.0",
             description="Control loop rate (Hz)",
         ),
+        DeclareLaunchArgument(
+            "verbose",
+            default_value="false",
+            description="Enable detailed control pipeline logging (cmd→PID→PLC→state)",
+        ),
     ]
 
     # ==================== ROS2 CONTROL ====================
@@ -147,6 +152,7 @@ def generate_launch_description():
         parameters=[
             {"simulation_mode": LaunchConfiguration("simulation_mode")},
             {"control_rate": LaunchConfiguration("control_rate")},
+            {"detailed_logging": LaunchConfiguration("verbose")},
             {"steering_kp": 50.0},
             {"steering_ki": 0.0},
             {"steering_kd": 5.0},

@@ -107,6 +107,13 @@ HardwareBridge::HardwareBridge(const rclcpp::NodeOptions & options)
   joint_states_pub_ = this->create_publisher<sensor_msgs::msg::JointState>(
     topic_joint_states_, reliable_qos);
 
+  // Gear state subscriber (from gamepad_teleop)
+  gear_state_sub_ = this->create_subscription<std_msgs::msg::Int32>(
+    "/gear_state", 10,
+    [this](const std_msgs::msg::Int32::SharedPtr msg) {
+      current_gear_ = msg->data;
+    });
+
   // Control loop timer
   auto period = std::chrono::duration<double>(1.0 / control_rate_);
   control_timer_ = this->create_wall_timer(
@@ -250,6 +257,20 @@ void HardwareBridge::control_loop()
     joint.state_effort = torque;
   }
 
+  // Compute PLC register equivalents (for logging in all modes)
+  for (auto & joint : joints_) {
+    int dir = MOTOR_DIRS[joint.axis_index];
+    joint.plc_torque_raw = static_cast<int32_t>(
+      std::llround(joint.state_effort * dir * PLC_TORQUE_SCALE));
+    if (joint.is_traction) {
+      joint.plc_speed_limit = static_cast<uint32_t>(
+        std::abs(joint.cmd_velocity) * PLC_SPEED_LIMIT_SCALE);
+    } else {
+      joint.plc_pos_raw = static_cast<int32_t>(
+        std::llround(joint.cmd_position * dir * PLC_POSITION_SCALE));
+    }
+  }
+
   // Send commands and read feedback
   if (simulation_mode_) {
     // Set torques to VirtualPLC
@@ -270,7 +291,7 @@ void HardwareBridge::control_loop()
     }
 
     if (detailed_logging_) {
-      virtual_plc_->logState(this->get_logger(), *this->get_clock());
+      logControlPipeline(dt);
     }
   } else {
     // Real hardware via Modbus
@@ -284,6 +305,10 @@ void HardwareBridge::control_loop()
         "Failed to read from hardware");
     } else {
       last_comm_time_ = std::chrono::steady_clock::now();
+    }
+
+    if (detailed_logging_) {
+      logControlPipeline(dt);
     }
   }
 
@@ -436,6 +461,46 @@ bool HardwareBridge::read_from_hardware()
 }
 #endif
 
+void HardwareBridge::logControlPipeline(double dt)
+{
+  // Throttled full-pipeline log: gear → cmd → PID → PLC regs → state
+  // Shows every 500ms (2 Hz) for readability
+  RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500,
+    "\n"
+    "──── Control Pipeline (dt=%.4f s) ── gear=%d ────\n"
+    "[CMD]   FR vel=%+8.3f rad/s   FL vel=%+8.3f rad/s\n"
+    "        RR pos=%+8.4f rad     RL pos=%+8.4f rad\n"
+    "[PID]   FR trq=%+8.2f Nm     FL trq=%+8.2f Nm\n"
+    "        RR trq=%+8.2f Nm     RL trq=%+8.2f Nm\n"
+    "[PLC]   FR spd_lim=%8u  trq_raw=%+7d\n"
+    "        FL spd_lim=%8u  trq_raw=%+7d\n"
+    "        RR pos_raw=%+8d trq_raw=%+7d\n"
+    "        RL pos_raw=%+8d trq_raw=%+7d\n"
+    "        (spd_lim: |vel|x1e5  pos_raw: rad x1e4  trq_raw: Nm x dir x10 [x0.1%%rated])\n"
+    "[STATE] FR vel=%+8.3f rad/s  pos=%+8.3f rad\n"
+    "        FL vel=%+8.3f rad/s  pos=%+8.3f rad\n"
+    "        RR vel=%+8.4f rad/s  pos=%+8.4f rad\n"
+    "        RL vel=%+8.4f rad/s  pos=%+8.4f rad\n"
+    "─────────────────────────────────────────────────",
+    dt, current_gear_,
+    // CMD
+    joints_[0].cmd_velocity, joints_[1].cmd_velocity,
+    joints_[2].cmd_position, joints_[3].cmd_position,
+    // PID
+    joints_[0].state_effort, joints_[1].state_effort,
+    joints_[2].state_effort, joints_[3].state_effort,
+    // PLC registers
+    joints_[0].plc_speed_limit, joints_[0].plc_torque_raw,
+    joints_[1].plc_speed_limit, joints_[1].plc_torque_raw,
+    joints_[2].plc_pos_raw, joints_[2].plc_torque_raw,
+    joints_[3].plc_pos_raw, joints_[3].plc_torque_raw,
+    // STATE (encoder feedback)
+    joints_[0].state_velocity, joints_[0].state_position,
+    joints_[1].state_velocity, joints_[1].state_position,
+    joints_[2].state_velocity, joints_[2].state_position,
+    joints_[3].state_velocity, joints_[3].state_position);
+}
+
 void HardwareBridge::publish_joint_states()
 {
   auto msg = sensor_msgs::msg::JointState();
@@ -449,13 +514,6 @@ void HardwareBridge::publish_joint_states()
   }
 
   joint_states_pub_->publish(msg);
-
-  if (detailed_logging_) {
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-      "[Bridge] FR(v=%.3f) FL(v=%.3f) RR(p=%.4f) RL(p=%.4f)",
-      joints_[0].state_velocity, joints_[1].state_velocity,
-      joints_[2].state_position, joints_[3].state_position);
-  }
 }
 
 }  // namespace raptorlift_hardware_bridge

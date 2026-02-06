@@ -17,6 +17,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
+#include "std_msgs/msg/int32.hpp"
 
 #ifdef HAS_MODBUS
 #include "raptorlift_hardware_bridge/modbus_driver.hpp"
@@ -109,6 +110,11 @@ struct JointData
   double state_velocity{0.0};
   double state_effort{0.0};
   PIDController pid;
+
+  // PLC register equivalents (computed every cycle for logging)
+  uint32_t plc_speed_limit{0};   // traction: |cmd_vel| × 100000
+  int32_t  plc_pos_raw{0};       // steering: cmd_pos × motor_dir × 10000
+  int32_t  plc_torque_raw{0};    // all: torque × motor_dir × 10
 };
 
 /**
@@ -216,6 +222,7 @@ private:
   void checkCommunicationTimeout();
   void handleEmergencyStop();
   bool attemptReconnect();
+  void logControlPipeline(double dt);
 
   // Subscribers
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_commands_sub_;
@@ -255,6 +262,18 @@ private:
   double traction_kp_, traction_ki_, traction_kd_;
   double max_steering_torque_;
   double max_traction_torque_;
+
+  // Motor mounting directions: FR=+1, FL=-1, RR=+1, RL=-1 (must match modbus_driver)
+  static constexpr int MOTOR_DIRS[4] = {+1, -1, +1, -1};
+
+  // PLC scale factors (must match modbus_driver.hpp)
+  static constexpr double PLC_POSITION_SCALE = 10000.0;   // rad → int32
+  static constexpr double PLC_TORQUE_SCALE = 10.0;        // Nm → ×0.1% rated
+  static constexpr double PLC_SPEED_LIMIT_SCALE = 100000.0;
+
+  // Gear state
+  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr gear_state_sub_;
+  int current_gear_{0};
 
   // Communication watchdog (Compy pattern)
   double comm_timeout_;
