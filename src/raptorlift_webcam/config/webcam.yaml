@@ -1,0 +1,24 @@
+/**:
+  ros__parameters:
+    # -- Device --
+    video_device: "/dev/video0"
+    framerate: 30.0
+    io_method: "mmap"
+
+    # -- Image format --
+    image_width: 640
+    image_height: 480
+    pixel_format: "mjpeg2rgb"
+
+    # -- Camera info --
+    camera_name: "raptorlift_webcam"
+    camera_frame_id: "webcam_optical"
+
+    # -- Auto exposure / white balance --
+    brightness: -1        # auto
+    contrast: -1          # auto
+    saturation: -1        # auto
+    sharpness: -1         # auto
+    autofocus: true
+    autoexposure: true
+    auto_white_balance: true

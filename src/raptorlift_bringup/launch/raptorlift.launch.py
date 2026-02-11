@@ -33,6 +33,11 @@ Architecture:
   │ Logitech C922    │────▶ frame: webcam_optical
   └──────────────────┘
 
+  Detection (optional, use_detection:=true):
+  /webcam/image_raw ──▶ detection_node ──▶ /webcam/detections      (Detection2DArray)
+                                       ──▶ /webcam/detection_image (annotated Image)
+                                       ──▶ /webcam/detection_count (Int32)
+
 Usage:
   # Simulation mode (default)
   ros2 launch raptorlift_bringup raptorlift.launch.py
@@ -119,6 +124,11 @@ def generate_launch_description():
             "use_webcam",
             default_value="true",
             description="Launch USB webcam driver (Logitech C922 via usb_cam)",
+        ),
+        DeclareLaunchArgument(
+            "use_detection",
+            default_value="false",
+            description="Launch YOLOv11 detection on webcam (requires GPU + ultralytics)",
         ),
     ]
 
@@ -315,6 +325,18 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("use_webcam")),
     )
 
+    # ==================== DETECTION ====================
+
+    detection_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(webcam_pkg, "launch", "detection.launch.py")
+        ),
+        launch_arguments={
+            "namespace": "webcam",
+        }.items(),
+        condition=IfCondition(LaunchConfiguration("use_detection")),
+    )
+
     # ==================== ASSEMBLE ====================
 
     nodes = [
@@ -334,6 +356,8 @@ def generate_launch_description():
         gamepad_teleop_node,
         # Webcam
         webcam_launch,
+        # Detection
+        detection_launch,
         # Visualization
         rviz_node,
     ]

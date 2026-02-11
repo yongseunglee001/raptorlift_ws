@@ -1,0 +1,9 @@
+detection_node:
+  ros__parameters:
+    model_path: ""
+    confidence_threshold: 0.5
+    iou_threshold: 0.45
+    device: "cuda:0"
+    input_topic: "image_raw"
+    publish_annotated_image: true
+    max_detections: 20
