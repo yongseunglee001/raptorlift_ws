@@ -66,9 +66,13 @@ enum class LiftCommand : int8_t
 /**
  * @brief GamepadTeleop node - Gamepad to cmd_vel + gear state
  *
+ * Applies gear-based velocity scaling internally so that output is in real
+ * m/s units. This keeps gear scaling scoped to human teleop input only,
+ * preventing it from corrupting Nav2 autonomous commands via twist_mux.
+ *
  * Publishes:
- *   - cmd_vel (TwistStamped): Normalized velocity [-1, 1] for twist_mux
- *   - gear_state (Int32): Current gear for velocity_scaler
+ *   - cmd_vel (TwistStamped): Gear-scaled velocity (m/s) for twist_mux
+ *   - gear_state (Int32): Current gear (informational)
  *   - lift_command (Int8): Lift control
  *   - teleop_state (String): Status info
  */
@@ -84,6 +88,7 @@ private:
   void process_buttons(const sensor_msgs::msg::Joy::SharedPtr msg);
   void process_axes(const sensor_msgs::msg::Joy::SharedPtr msg);
   double apply_deadzone(double value) const;
+  double calculate_gear_velocity() const;
   void publish_state();
 
   // Subscribers
@@ -99,6 +104,8 @@ private:
   rclcpp::TimerBase::SharedPtr publish_timer_;
 
   // Parameters
+  double min_linear_vel_;      // Velocity at gear 1 (m/s)
+  double max_linear_vel_;      // Velocity at max gear (m/s)
   double max_angular_vel_;     // Maximum angular velocity (rad/s)
   double deadzone_;            // Joystick deadzone
   int num_gears_;              // Number of gear steps

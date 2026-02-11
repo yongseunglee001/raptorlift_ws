@@ -22,6 +22,8 @@ GamepadTeleop::GamepadTeleop(const rclcpp::NodeOptions & options)
   first_joy_msg_(true)
 {
   // Declare parameters
+  this->declare_parameter("min_linear_vel", 0.1);
+  this->declare_parameter("max_linear_vel", 2.0);
   this->declare_parameter("max_angular_vel", 1.0);
   this->declare_parameter("deadzone", 0.1);
   this->declare_parameter("num_gears", 20);
@@ -30,6 +32,8 @@ GamepadTeleop::GamepadTeleop(const rclcpp::NodeOptions & options)
   this->declare_parameter("frame_id", "base_link");
 
   // Get parameters
+  min_linear_vel_ = this->get_parameter("min_linear_vel").as_double();
+  max_linear_vel_ = this->get_parameter("max_linear_vel").as_double();
   max_angular_vel_ = this->get_parameter("max_angular_vel").as_double();
   deadzone_ = this->get_parameter("deadzone").as_double();
   num_gears_ = this->get_parameter("num_gears").as_int();
@@ -70,9 +74,11 @@ GamepadTeleop::GamepadTeleop(const rclcpp::NodeOptions & options)
   // Initialize timing
   last_joy_time_ = this->now();
 
-  RCLCPP_INFO(this->get_logger(), "GamepadTeleop initialized (simplified for twist_mux)");
+  RCLCPP_INFO(this->get_logger(), "GamepadTeleop initialized (gear-scaled output for twist_mux)");
   RCLCPP_INFO(this->get_logger(), "  Gears: %d (current: %d)", num_gears_, current_gear_);
-  RCLCPP_INFO(this->get_logger(), "  Output: normalized cmd_vel [-1, 1] + gear_state");
+  RCLCPP_INFO(this->get_logger(), "  Velocity range: %.2f - %.2f m/s (gear-scaled output)",
+    min_linear_vel_, max_linear_vel_);
+  RCLCPP_INFO(this->get_logger(), "  Output: gear-scaled cmd_vel (m/s) + gear_state");
 }
 
 void GamepadTeleop::joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg)
@@ -135,11 +141,13 @@ void GamepadTeleop::process_buttons(const sensor_msgs::msg::Joy::SharedPtr msg)
   // Gear control
   if (is_pressed(XboxButtons::L1)) {
     current_gear_ = std::max(1, current_gear_ - 1);
-    RCLCPP_INFO(this->get_logger(), "Gear DOWN: %d", current_gear_);
+    RCLCPP_INFO(this->get_logger(), "Gear DOWN: %d (max vel: %.2f m/s)",
+      current_gear_, calculate_gear_velocity());
   }
   if (is_pressed(XboxButtons::R1)) {
     current_gear_ = std::min(num_gears_, current_gear_ + 1);
-    RCLCPP_INFO(this->get_logger(), "Gear UP: %d", current_gear_);
+    RCLCPP_INFO(this->get_logger(), "Gear UP: %d (max vel: %.2f m/s)",
+      current_gear_, calculate_gear_velocity());
   }
 
   // Lift control
@@ -186,7 +194,7 @@ void GamepadTeleop::process_axes(const sensor_msgs::msg::Joy::SharedPtr msg)
   // Speed modifier: LT slows down, RT speeds up
   double speed_modifier = (1.0 - lt_normalized * 0.7) * (1.0 + rt_normalized * 0.5);
 
-  // Output normalized values (velocity_scaler will apply gear scaling)
+  // Output normalized values [-1, 1] (gear scaling applied at publish stage)
   target_linear_x_ = left_stick_y * speed_modifier;
   target_angular_z_ = right_stick_x * speed_modifier;
 
@@ -217,6 +225,17 @@ double GamepadTeleop::apply_deadzone(double value) const
   return sign * (std::abs(value) - deadzone_) / (1.0 - deadzone_);
 }
 
+double GamepadTeleop::calculate_gear_velocity() const
+{
+  if (num_gears_ <= 1) {
+    return max_linear_vel_;
+  }
+  return min_linear_vel_ +
+         (max_linear_vel_ - min_linear_vel_) *
+         static_cast<double>(current_gear_ - 1) /
+         static_cast<double>(num_gears_ - 1);
+}
+
 void GamepadTeleop::publish_cmd_vel()
 {
   double time_since_joy = (this->now() - last_joy_time_).seconds();
@@ -225,14 +244,18 @@ void GamepadTeleop::publish_cmd_vel()
   double output_angular = 0.0;
 
   if (time_since_joy <= joy_timeout_) {
-    output_linear = target_linear_x_;
-    output_angular = target_angular_z_;
+    // Apply gear-based velocity scaling (outputs real m/s, not normalized)
+    double gear_max_vel = calculate_gear_velocity();
+    output_linear = target_linear_x_ * gear_max_vel;
+    // Scale angular velocity proportionally with gear
+    double gear_angular_scale = (max_linear_vel_ > 0.0) ? (gear_max_vel / max_linear_vel_) : 1.0;
+    output_angular = target_angular_z_ * max_angular_vel_ * gear_angular_scale;
   } else {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
       "No joy messages for %.1f seconds", time_since_joy);
   }
 
-  // Publish normalized cmd_vel (TwistStamped)
+  // Publish gear-scaled cmd_vel (TwistStamped)
   auto twist_msg = geometry_msgs::msg::TwistStamped();
   twist_msg.header.stamp = this->now();
   twist_msg.header.frame_id = frame_id_;

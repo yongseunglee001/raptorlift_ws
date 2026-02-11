@@ -4,16 +4,21 @@ RaptorLift Unified Bringup Launch File
 Complete manual control stack with ros2_control, twist_mux, teleop, and LiDAR drivers.
 
 Architecture:
-  ┌─────────────┐     ┌───────────┐     ┌─────────────────┐     ┌────────────────┐
-  │ gamepad     │────▶│           │     │                 │     │                │
-  │ /teleop/    │     │ twist_mux │────▶│ velocity_scaler │────▶│ ackermann_     │
-  │ cmd_vel     │     │           │     │ (gear scaling)  │     │ controller     │
-  └─────────────┘     │           │     └─────────────────┘     └────────────────┘
-  ┌─────────────┐     │           │              ▲
-  │ keyboard    │────▶│           │              │
-  │ /key/cmd_vel│     └───────────┘       /gear_state
-  └─────────────┘                               │
-                                          gamepad_teleop
+  ┌─────────────┐     ┌───────────┐     ┌────────────────┐
+  │ gamepad     │────▶│           │     │                │
+  │ /teleop/    │     │ twist_mux │────▶│ ackermann_     │
+  │ cmd_vel     │     │           │     │ controller     │
+  │ (gear-scaled│     │           │     └────────────────┘
+  │  real m/s)  │     │           │
+  └─────────────┘     │           │
+  ┌─────────────┐     │           │
+  │ keyboard    │────▶│           │
+  │ /key/cmd_vel│     │           │
+  └─────────────┘     │           │
+  ┌─────────────┐     │           │
+  │ Nav2        │────▶│           │
+  │ /nav/cmd_vel│     └───────────┘
+  └─────────────┘
 
   LiDAR Drivers:
   ┌──────────────────┐     /lidar_points (PointCloud2)
@@ -21,6 +26,11 @@ Architecture:
   └──────────────────┘
   ┌──────────────────┐     /rslidar_front/points (PointCloud2)
   │ RSE1 Front (FOV) │────▶ frame: lidar_rslidar_front_link
+  └──────────────────┘
+
+  Webcam:
+  ┌──────────────────┐     /webcam/image_raw (Image)
+  │ Logitech C922    │────▶ frame: webcam_optical
   └──────────────────┘
 
 Usage:
@@ -37,9 +47,10 @@ Usage:
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -49,12 +60,12 @@ def generate_launch_description():
     description_pkg = get_package_share_directory("raptorlift_description")
     bringup_pkg = get_package_share_directory("raptorlift_bringup")
     teleop_pkg = get_package_share_directory("raptorlift_teleop")
+    webcam_pkg = get_package_share_directory("raptorlift_webcam")
 
     # File paths
     urdf_file = os.path.join(description_pkg, "urdf", "raptorlift.urdf")
     controllers_file = os.path.join(bringup_pkg, "config", "raptorlift_controllers.yaml")
     twist_mux_config = os.path.join(teleop_pkg, "config", "twist_mux.yaml")
-    velocity_scaler_config = os.path.join(teleop_pkg, "config", "velocity_scaler.yaml")
 
     # Read URDF
     with open(urdf_file, "r") as f:
@@ -103,6 +114,11 @@ def generate_launch_description():
             "verbose",
             default_value="false",
             description="Enable detailed control pipeline logging (cmd→PID→PLC→state)",
+        ),
+        DeclareLaunchArgument(
+            "use_webcam",
+            default_value="true",
+            description="Launch USB webcam driver (Logitech C922 via usb_cam)",
         ),
     ]
 
@@ -185,7 +201,7 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("use_hardware_bridge")),
     )
 
-    # ==================== TWIST MUX + VELOCITY SCALER ====================
+    # ==================== TWIST MUX ====================
 
     # twist_mux: selects between multiple cmd_vel sources
     twist_mux_node = Node(
@@ -194,20 +210,6 @@ def generate_launch_description():
         name="twist_mux",
         parameters=[twist_mux_config],
         remappings=[
-            ("cmd_vel_out", "/cmd_vel_mux"),
-        ],
-        output="screen",
-    )
-
-    # velocity_scaler: applies gear-based scaling
-    velocity_scaler_node = Node(
-        package="raptorlift_teleop",
-        executable="velocity_scaler",
-        name="velocity_scaler",
-        parameters=[velocity_scaler_config],
-        remappings=[
-            ("cmd_vel_in", "/cmd_vel_mux"),
-            ("gear_state", "/gear_state"),
             ("cmd_vel_out", "/ackermann_steering_controller/reference"),
         ],
         output="screen",
@@ -242,6 +244,8 @@ def generate_launch_description():
                 "deadzone": 0.1,
                 "publish_rate": 50.0,
                 "joy_timeout": 0.5,
+                "min_linear_vel": 0.1,
+                "max_linear_vel": 2.0,
             }
         ],
         remappings=[
@@ -296,6 +300,20 @@ def generate_launch_description():
         output="screen",
     )
 
+    # ==================== WEBCAM ====================
+
+    webcam_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(webcam_pkg, "launch", "webcam.launch.py")
+        ),
+        launch_arguments={
+            "namespace": "webcam",
+            "video_device": "/dev/video0",
+            "show_image": "false",
+        }.items(),
+        condition=IfCondition(LaunchConfiguration("use_webcam")),
+    )
+
     # ==================== ASSEMBLE ====================
 
     nodes = [
@@ -308,12 +326,13 @@ def generate_launch_description():
         # LiDAR drivers
         hesai_lidar_node,
         rslidar_front_node,
-        # Velocity control stack
+        # Velocity mux
         twist_mux_node,
-        velocity_scaler_node,
         # Teleop
         joy_node,
         gamepad_teleop_node,
+        # Webcam
+        webcam_launch,
         # Visualization
         rviz_node,
     ]
