@@ -194,13 +194,14 @@ void GamepadTeleop::process_axes(const sensor_msgs::msg::Joy::SharedPtr msg)
   target_linear_x_ = std::clamp(target_linear_x_, -1.0, 1.0);
   target_angular_z_ = std::clamp(target_angular_z_, -1.0, 1.0);
 
-  // D-pad for precise movement
+  // D-pad for precise movement (diagonal supported).
+  // Note: Xbox D-pad hat switch may ghost one axis when transitioning from
+  // diagonal to cardinal. Workaround: fully release D-pad before re-pressing.
   if (msg->axes.size() >= 8) {
     double dpad_y = msg->axes[XboxAxes::DPAD_Y];
     double dpad_x = msg->axes[XboxAxes::DPAD_X];
 
     if (std::abs(dpad_y) > 0.5 || std::abs(dpad_x) > 0.5) {
-      // D-pad gives small fixed values
       target_linear_x_ = dpad_y * 0.2;
       target_angular_z_ = -dpad_x * 0.3;
     }

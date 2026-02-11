@@ -121,6 +121,7 @@ private:
   // Timing
   rclcpp::Time last_joy_time_;
   int state_publish_counter_{0};
+
 };
 
 }  // namespace raptorlift_teleop
