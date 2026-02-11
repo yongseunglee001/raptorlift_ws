@@ -48,7 +48,7 @@ def generate_launch_description():
     declared_arguments = [
         DeclareLaunchArgument(
             "use_sim_time",
-            default_value="true",
+            default_value="false",
             description="Use simulation time",
         ),
         DeclareLaunchArgument(
@@ -74,6 +74,17 @@ def generate_launch_description():
     ]
 
     use_sim_time = LaunchConfiguration("use_sim_time")
+
+    # LiDAR processing: PointCloud2 → LaserScan conversion
+    # Hesai XT32 → /scan (360°), RSE1 Front → /scan_front (limited FOV)
+    lidar_processing = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(nav_pkg, "launch", "lidar_processing.launch.py")
+        ),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+        }.items(),
+    )
 
     # Nav2 bringup (localization + navigation + collision_monitor as composable nodes)
     # Collision monitor params are in nav2_params.yaml with cmd_vel_out_topic: /nav/cmd_vel
@@ -104,6 +115,7 @@ def generate_launch_description():
     return LaunchDescription(
         declared_arguments
         + [
+            lidar_processing,
             nav2_bringup,
             rviz_node,
         ]

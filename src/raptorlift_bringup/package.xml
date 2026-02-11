@@ -20,6 +20,8 @@
   <exec_depend>raptorlift_teleop</exec_depend>
   <exec_depend>topic_based_ros2_control</exec_depend>
   <exec_depend>joy</exec_depend>
+  <exec_depend>hesai_ros_driver</exec_depend>
+  <exec_depend>rslidar_sdk</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

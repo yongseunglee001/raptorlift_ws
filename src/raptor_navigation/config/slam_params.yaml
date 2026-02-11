@@ -8,7 +8,7 @@ slam_toolbox:
     map_frame: map
     base_frame: base_link
     scan_topic: /scan
-    use_sim_time: true
+    use_sim_time: false
     mode: mapping
 
     # Throttle / timing

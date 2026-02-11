@@ -7,9 +7,13 @@ This is the one-command launch for a complete autonomous-capable system.
 Architecture:
   raptorlift_bringup (ros2_control + twist_mux + teleop)
        +
-  raptor_navigation (Nav2: AMCL + SmacPlannerHybrid + RPP + CollisionMonitor)
+  raptor_navigation (lidar_processing + Nav2: AMCL + SmacPlannerHybrid + RPP + CollisionMonitor)
        =
   Full autonomous stack with teleop override (twist_mux priority)
+
+NOTE: Prefer launching bringup and navigation separately:
+  1. raptorlift_bringup/raptorlift.launch.py (boots first, auto-start)
+  2. raptor_navigation/slam.launch.py  OR  navigation.launch.py (layered on top)
 
 Usage:
   # Navigation with existing map
@@ -42,7 +46,7 @@ def generate_launch_description():
     declared_arguments = [
         DeclareLaunchArgument(
             "use_sim_time",
-            default_value="true",
+            default_value="false",
             description="Use simulation time (for Isaac Sim)",
         ),
         DeclareLaunchArgument(
@@ -130,6 +134,7 @@ def generate_launch_description():
         declared_arguments
         + [
             raptorlift_bringup,
+            # navigation.launch.py and slam.launch.py include lidar_processing internally
             navigation_launch,
             slam_launch,
         ]

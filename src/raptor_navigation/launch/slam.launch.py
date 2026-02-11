@@ -40,7 +40,7 @@ def generate_launch_description():
     declared_arguments = [
         DeclareLaunchArgument(
             "use_sim_time",
-            default_value="true",
+            default_value="false",
             description="Use simulation time",
         ),
         DeclareLaunchArgument(
@@ -66,6 +66,17 @@ def generate_launch_description():
     ]
 
     use_sim_time = LaunchConfiguration("use_sim_time")
+
+    # LiDAR processing: PointCloud2 → LaserScan conversion
+    # Hesai XT32 → /scan (360°), RSE1 Front → /scan_front (limited FOV)
+    lidar_processing = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(nav_pkg, "launch", "lidar_processing.launch.py")
+        ),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+        }.items(),
+    )
 
     # slam_toolbox online_async node (provides map->odom TF, no AMCL needed)
     slam_toolbox_node = Node(
@@ -107,6 +118,7 @@ def generate_launch_description():
     return LaunchDescription(
         declared_arguments
         + [
+            lidar_processing,
             slam_toolbox_node,
             nav2_navigation,
             rviz_node,

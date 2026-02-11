@@ -1,7 +1,7 @@
 """
 RaptorLift Unified Bringup Launch File
 
-Complete manual control stack with ros2_control, twist_mux, and teleop.
+Complete manual control stack with ros2_control, twist_mux, teleop, and LiDAR drivers.
 
 Architecture:
   ┌─────────────┐     ┌───────────┐     ┌─────────────────┐     ┌────────────────┐
@@ -15,6 +15,14 @@ Architecture:
   └─────────────┘                               │
                                           gamepad_teleop
 
+  LiDAR Drivers:
+  ┌──────────────────┐     /lidar_points (PointCloud2)
+  │ Hesai XT32 (360°)│────▶ frame: lidar_link
+  └──────────────────┘
+  ┌──────────────────┐     /rslidar_front/points (PointCloud2)
+  │ RSE1 Front (FOV) │────▶ frame: lidar_rslidar_front_link
+  └──────────────────┘
+
 Usage:
   # Simulation mode (default)
   ros2 launch raptorlift_bringup raptorlift.launch.py
@@ -22,8 +30,8 @@ Usage:
   # Real hardware mode
   ros2 launch raptorlift_bringup raptorlift.launch.py simulation_mode:=false
 
-  # Isaac Sim mode (no hardware_bridge)
-  ros2 launch raptorlift_bringup raptorlift.launch.py use_hardware_bridge:=false
+  # Isaac Sim mode (no hardware_bridge, no lidars)
+  ros2 launch raptorlift_bringup raptorlift.launch.py use_hardware_bridge:=false use_lidars:=false
 """
 
 import os
@@ -82,6 +90,11 @@ def generate_launch_description():
             description="Enable teleop nodes (gamepad + keyboard support)",
         ),
         DeclareLaunchArgument(
+            "use_lidars",
+            default_value="true",
+            description="Launch LiDAR drivers (Hesai XT32 + RSE1 Front)",
+        ),
+        DeclareLaunchArgument(
             "control_rate",
             default_value="100.0",
             description="Control loop rate (Hz)",
@@ -128,10 +141,17 @@ def generate_launch_description():
     )
 
     # Spawn ackermann_steering_controller
+    # Remappings route the controller's namespaced odom/TF topics to
+    # the standard /odom and /tf expected by Nav2.
     ackermann_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["ackermann_steering_controller", "--controller-manager", "/controller_manager"],
+        arguments=[
+            "ackermann_steering_controller",
+            "--controller-manager", "/controller_manager",
+            "--controller-ros-args",
+            "--remap /ackermann_steering_controller/tf_odometry:=/tf --remap /ackermann_steering_controller/odometry:=/odom",
+        ],
         output="screen",
     )
 
@@ -232,6 +252,36 @@ def generate_launch_description():
         output="screen",
     )
 
+    # ==================== LIDAR DRIVERS ====================
+
+    # Hesai XT32 (360° main LiDAR)
+    # Publishes: /lidar_points (PointCloud2), frame: lidar_link
+    # Config loaded from hesai_ros_driver package default config.yaml
+    hesai_lidar_node = Node(
+        package="hesai_ros_driver",
+        executable="hesai_ros_driver_node",
+        name="hesai_lidar",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("use_lidars")),
+    )
+
+    # RoboSense RSE1 Front (solid-state, limited FOV)
+    # Publishes: /rslidar_front/points (PointCloud2), frame: lidar_rslidar_front_link
+    rslidar_ws_src = os.path.expanduser(
+        "~/RaptorYamato/IsaacSim-ros_workspaces/jazzy_ws/src"
+    )
+    rslidar_config_file = os.path.join(
+        rslidar_ws_src, "rslidar_sdk", "config", "config.yaml"
+    )
+    rslidar_front_node = Node(
+        package="rslidar_sdk",
+        executable="rslidar_sdk_node",
+        name="rslidar_front",
+        output="screen",
+        parameters=[{"config_path": rslidar_config_file}],
+        condition=IfCondition(LaunchConfiguration("use_lidars")),
+    )
+
     # ==================== VISUALIZATION ====================
 
     # RViz
@@ -255,6 +305,9 @@ def generate_launch_description():
         joint_state_broadcaster_spawner,
         delay_ackermann_controller,
         hardware_bridge_node,
+        # LiDAR drivers
+        hesai_lidar_node,
+        rslidar_front_node,
         # Velocity control stack
         twist_mux_node,
         velocity_scaler_node,
