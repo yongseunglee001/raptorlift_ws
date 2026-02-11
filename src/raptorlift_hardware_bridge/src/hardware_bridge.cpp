@@ -346,6 +346,18 @@ void HardwareBridge::control_loop()
         "Failed to read from hardware");
     } else {
       last_comm_time_ = std::chrono::steady_clock::now();
+      // Seed PID measurement after first successful read to prevent derivative spike
+      if (!first_read_done_) {
+        for (auto & joint : joints_) {
+          if (joint.is_traction) {
+            joint.pid.seedMeasurement(joint.state_velocity / wheel_radius_);
+          } else {
+            joint.pid.seedMeasurement(joint.state_position);
+          }
+        }
+        first_read_done_ = true;
+        RCLCPP_INFO(this->get_logger(), "PID measurement seeded from hardware state");
+      }
     }
 
     if (detailed_logging_) {

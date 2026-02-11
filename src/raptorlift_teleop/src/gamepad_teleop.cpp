@@ -203,15 +203,19 @@ void GamepadTeleop::process_axes(const sensor_msgs::msg::Joy::SharedPtr msg)
   target_angular_z_ = std::clamp(target_angular_z_, -1.0, 1.0);
 
   // D-pad for precise movement (diagonal supported).
+  // Outputs absolute velocity (bypasses gear scaling) so D-pad is always
+  // usable regardless of current gear. Fixed at 0.1 m/s and 0.15 rad/s.
   // Note: Xbox D-pad hat switch may ghost one axis when transitioning from
   // diagonal to cardinal. Workaround: fully release D-pad before re-pressing.
+  dpad_active_ = false;
   if (msg->axes.size() >= 8) {
     double dpad_y = msg->axes[XboxAxes::DPAD_Y];
     double dpad_x = msg->axes[XboxAxes::DPAD_X];
 
     if (std::abs(dpad_y) > 0.5 || std::abs(dpad_x) > 0.5) {
-      target_linear_x_ = dpad_y * 0.2;
-      target_angular_z_ = -dpad_x * 0.3;
+      dpad_active_ = true;
+      dpad_linear_x_ = dpad_y * 0.1;
+      dpad_angular_z_ = -dpad_x * 0.15;
     }
   }
 }
@@ -244,12 +248,18 @@ void GamepadTeleop::publish_cmd_vel()
   double output_angular = 0.0;
 
   if (time_since_joy <= joy_timeout_) {
-    // Apply gear-based velocity scaling (outputs real m/s, not normalized)
-    double gear_max_vel = calculate_gear_velocity();
-    output_linear = target_linear_x_ * gear_max_vel;
-    // Scale angular velocity proportionally with gear
-    double gear_angular_scale = (max_linear_vel_ > 0.0) ? (gear_max_vel / max_linear_vel_) : 1.0;
-    output_angular = target_angular_z_ * max_angular_vel_ * gear_angular_scale;
+    if (dpad_active_) {
+      // D-pad: absolute velocity output (bypasses gear scaling)
+      output_linear = dpad_linear_x_;
+      output_angular = dpad_angular_z_;
+    } else {
+      // Analog sticks: gear-based velocity scaling (outputs real m/s)
+      double gear_max_vel = calculate_gear_velocity();
+      output_linear = target_linear_x_ * gear_max_vel;
+      // Scale angular velocity proportionally with gear
+      double gear_angular_scale = (max_linear_vel_ > 0.0) ? (gear_max_vel / max_linear_vel_) : 1.0;
+      output_angular = target_angular_z_ * max_angular_vel_ * gear_angular_scale;
+    }
   } else {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
       "No joy messages for %.1f seconds", time_since_joy);

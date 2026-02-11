@@ -48,8 +48,6 @@ hardware_bridge:
     #   Physics model: alpha = (torque - damping * velocity) / inertia
     #   Must match raptorlift_hardware.cpp defaults for consistent sim behavior
     simulation:
-      wheel_radius: 0.1715        # meters
-      max_steering_angle: 0.7     # rad (~40 deg)
       steering_inertia: 0.5       # kg*m^2
       traction_inertia: 0.08      # kg*m^2
       steering_damping: 0.5       # N*m*s/rad

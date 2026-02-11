@@ -244,8 +244,9 @@ def generate_launch_description():
                 "deadzone": 0.1,
                 "publish_rate": 50.0,
                 "joy_timeout": 0.5,
-                "min_linear_vel": 0.1,
-                "max_linear_vel": 2.0,
+                "min_linear_vel": 0.05,
+                "max_linear_vel": 1.0,
+                "max_angular_vel": 0.5,
             }
         ],
         remappings=[

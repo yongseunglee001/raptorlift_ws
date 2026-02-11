@@ -252,6 +252,7 @@ private:
   // Timing
   rclcpp::Time last_control_time_;
   bool modbus_connected_{false};
+  bool first_read_done_{false};   // Seed PID measurement after first hardware read
 };
 
 }  // namespace raptorlift_hardware_bridge

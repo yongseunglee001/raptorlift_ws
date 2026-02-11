@@ -121,6 +121,11 @@ private:
   double target_angular_z_;    // Normalized [-1, 1]
   LiftCommand current_lift_cmd_;
 
+  // D-pad absolute velocity (bypasses gear scaling for precise positioning)
+  bool dpad_active_{false};
+  double dpad_linear_x_{0.0};
+  double dpad_angular_z_{0.0};
+
   // Button state tracking
   std::vector<int> prev_buttons_;
   bool first_joy_msg_;

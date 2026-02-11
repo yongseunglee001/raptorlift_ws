@@ -72,5 +72,8 @@ ackermann_steering_controller:
     twist_covariance_diagonal: [0.001, 0.001, 0.001, 0.001, 0.001, 0.01]
 
     # Feedback
+    # CRITICAL: position_feedback must remain false for rear-steer.
+    # The ackermann_steering_controller assumes front-steer, so hardware steering
+    # state is negated. Feeding it back would cause sign mismatch and instability.
     position_feedback: false
     velocity_feedback: true

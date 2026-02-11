@@ -29,17 +29,9 @@ ament_target_dependencies(gamepad_teleop
   std_msgs
 )
 
-add_executable(velocity_scaler src/velocity_scaler.cpp)
-ament_target_dependencies(velocity_scaler
-  rclcpp
-  geometry_msgs
-  std_msgs
-)
-
 # Install executables
 install(TARGETS
   gamepad_teleop
-  velocity_scaler
   DESTINATION lib/${PROJECT_NAME}
 )
 
