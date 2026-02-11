@@ -16,11 +16,20 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    EmitEvent,
+    IncludeLaunchDescription,
+    LogInfo,
+    RegisterEventHandler,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
+from lifecycle_msgs.msg import Transition
 
 
 def generate_launch_description():
@@ -78,16 +87,44 @@ def generate_launch_description():
         }.items(),
     )
 
-    # slam_toolbox online_async node (provides map->odom TF, no AMCL needed)
-    slam_toolbox_node = Node(
+    # slam_toolbox online_async node (LifecycleNode: requires configure→activate)
+    # Provides map→odom TF, no AMCL needed
+    slam_toolbox_node = LifecycleNode(
         package="slam_toolbox",
         executable="async_slam_toolbox_node",
         name="slam_toolbox",
+        namespace="",
         output="screen",
         parameters=[
             LaunchConfiguration("slam_params_file"),
-            {"use_sim_time": use_sim_time},
+            {"use_sim_time": use_sim_time, "use_lifecycle_manager": False},
         ],
+    )
+
+    # Autostart: configure slam_toolbox when process starts
+    configure_slam = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=lambda node: node == slam_toolbox_node,
+            transition_id=Transition.TRANSITION_CONFIGURE,
+        ),
+    )
+
+    # Autostart: activate slam_toolbox after configure completes
+    activate_slam = RegisterEventHandler(
+        OnStateTransition(
+            target_lifecycle_node=slam_toolbox_node,
+            start_state="configuring",
+            goal_state="inactive",
+            entities=[
+                LogInfo(msg="[slam.launch.py] slam_toolbox configured, activating..."),
+                EmitEvent(
+                    event=ChangeState(
+                        lifecycle_node_matcher=lambda node: node == slam_toolbox_node,
+                        transition_id=Transition.TRANSITION_ACTIVATE,
+                    ),
+                ),
+            ],
+        ),
     )
 
     # Nav2 navigation stack (without AMCL/map_server since SLAM provides TF)
@@ -120,6 +157,8 @@ def generate_launch_description():
         + [
             lidar_processing,
             slam_toolbox_node,
+            configure_slam,
+            activate_slam,
             nav2_navigation,
             rviz_node,
         ]

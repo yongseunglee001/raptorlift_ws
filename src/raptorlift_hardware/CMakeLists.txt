@@ -11,6 +11,13 @@ find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(raptorlift_hardware_bridge REQUIRED)
+
+# Optional: libmodbus for real hardware support
+find_package(PkgConfig)
+if(PkgConfig_FOUND)
+  pkg_check_modules(MODBUS libmodbus)
+endif()
 
 # Build the hardware interface library
 add_library(${PROJECT_NAME} SHARED
@@ -29,7 +36,18 @@ ament_target_dependencies(${PROJECT_NAME}
   pluginlib
   rclcpp
   rclcpp_lifecycle
+  raptorlift_hardware_bridge
 )
+
+# Link modbus driver library if available
+if(MODBUS_FOUND)
+  message(STATUS "libmodbus found - enabling real hardware support in ros2_control plugin")
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HAS_MODBUS)
+  target_include_directories(${PROJECT_NAME} PRIVATE ${MODBUS_INCLUDE_DIRS})
+  target_link_libraries(${PROJECT_NAME} ${MODBUS_LIBRARIES})
+else()
+  message(WARNING "libmodbus NOT found - ros2_control plugin will be simulation-only")
+endif()
 
 # Visibility control
 target_compile_definitions(${PROJECT_NAME} PRIVATE "RAPTORLIFT_HARDWARE_BUILDING_DLL")
@@ -69,6 +87,7 @@ ament_export_dependencies(
   pluginlib
   rclcpp
   rclcpp_lifecycle
+  raptorlift_hardware_bridge
 )
 
 ament_package()

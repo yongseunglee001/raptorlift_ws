@@ -40,6 +40,15 @@ HardwareBridge::HardwareBridge(const rclcpp::NodeOptions & options)
   this->declare_parameter("traction_kd", 0.0);
   this->declare_parameter("max_traction_torque", 150.0);
 
+  // Wheel geometry
+  this->declare_parameter("wheel_radius", 0.1715);
+
+  // Virtual PLC simulation physics
+  this->declare_parameter("simulation.steering_inertia", 0.5);
+  this->declare_parameter("simulation.traction_inertia", 0.08);
+  this->declare_parameter("simulation.steering_damping", 0.5);
+  this->declare_parameter("simulation.traction_damping", 1.0);
+
   // Communication watchdog (Compy pattern)
   this->declare_parameter("comm_timeout", 1.0);
   this->declare_parameter("reconnect_interval", 5.0);
@@ -68,6 +77,8 @@ HardwareBridge::HardwareBridge(const rclcpp::NodeOptions & options)
   traction_kd_ = this->get_parameter("traction_kd").as_double();
   max_traction_torque_ = this->get_parameter("max_traction_torque").as_double();
 
+  wheel_radius_ = this->get_parameter("wheel_radius").as_double();
+
   comm_timeout_ = this->get_parameter("comm_timeout").as_double();
   reconnect_interval_ = this->get_parameter("reconnect_interval").as_double();
 
@@ -78,23 +89,38 @@ HardwareBridge::HardwareBridge(const rclcpp::NodeOptions & options)
   // Initialize joints in axis order: FR(0), FL(1), RR(2), RL(3)
   initialize_joints();
 
+  // Load simulation physics parameters (used when creating VirtualPLC)
+  double sim_steering_inertia = this->get_parameter("simulation.steering_inertia").as_double();
+  double sim_traction_inertia = this->get_parameter("simulation.traction_inertia").as_double();
+  double sim_steering_damping = this->get_parameter("simulation.steering_damping").as_double();
+  double sim_traction_damping = this->get_parameter("simulation.traction_damping").as_double();
+
+  auto make_virtual_plc = [&]() {
+    return std::make_unique<VirtualPLCSimulator>(
+      sim_steering_inertia, sim_traction_inertia,
+      sim_steering_damping, sim_traction_damping);
+  };
+
   // Initialize communication
   if (simulation_mode_) {
-    virtual_plc_ = std::make_unique<VirtualPLCSimulator>();
-    RCLCPP_INFO(this->get_logger(), "Virtual PLC simulator initialized");
+    virtual_plc_ = make_virtual_plc();
+    RCLCPP_INFO(this->get_logger(),
+      "Virtual PLC simulator initialized (steer_I=%.3f steer_D=%.3f tract_I=%.3f tract_D=%.3f)",
+      sim_steering_inertia, sim_steering_damping,
+      sim_traction_inertia, sim_traction_damping);
   } else {
 #ifdef HAS_MODBUS
     if (!initialize_modbus()) {
       RCLCPP_WARN(this->get_logger(),
         "Failed to connect to Modbus - falling back to simulation mode");
       simulation_mode_ = true;
-      virtual_plc_ = std::make_unique<VirtualPLCSimulator>();
+      virtual_plc_ = make_virtual_plc();
     }
 #else
     RCLCPP_WARN(this->get_logger(),
       "Built without libmodbus support - using simulation mode");
     simulation_mode_ = true;
-    virtual_plc_ = std::make_unique<VirtualPLCSimulator>();
+    virtual_plc_ = make_virtual_plc();
 #endif
   }
 
@@ -140,6 +166,8 @@ HardwareBridge::HardwareBridge(const rclcpp::NodeOptions & options)
     traction_kp_, traction_ki_, traction_kd_, max_traction_torque_);
   RCLCPP_INFO(this->get_logger(), "  Steering PID: Kp=%.1f Ki=%.1f Kd=%.1f (max=%.1f)",
     steering_kp_, steering_ki_, steering_kd_, max_steering_torque_);
+  RCLCPP_INFO(this->get_logger(), "  Wheel radius: %.4f m (joint velocity in m/s, PLC in rad/s)",
+    wheel_radius_);
 }
 
 void HardwareBridge::initialize_joints()
@@ -153,7 +181,7 @@ void HardwareBridge::initialize_joints()
     joints_[i].axis_index = static_cast<int>(i);  // 0=FR, 1=FL
     joints_[i].is_traction = true;
     joints_[i].pid.setGains(traction_kp_, traction_ki_, traction_kd_);
-    joints_[i].pid.setLimits(-max_traction_torque_, max_traction_torque_);
+    joints_[i].pid.setOutputLimits(-max_traction_torque_, max_traction_torque_);
   }
 
   // Steering joints: RR(axis 2), RL(axis 3)
@@ -163,7 +191,7 @@ void HardwareBridge::initialize_joints()
     joints_[idx].axis_index = idx;  // 2=RR, 3=RL
     joints_[idx].is_traction = false;
     joints_[idx].pid.setGains(steering_kp_, steering_ki_, steering_kd_);
-    joints_[idx].pid.setLimits(-max_steering_torque_, max_steering_torque_);
+    joints_[idx].pid.setOutputLimits(-max_steering_torque_, max_steering_torque_);
   }
 
   RCLCPP_INFO(this->get_logger(), "Initialized 4 axes: 2 traction (FR,FL) + 2 steering (RR,RL)");
@@ -209,9 +237,13 @@ void HardwareBridge::joint_commands_callback(const sensor_msgs::msg::JointState:
           }
         } else {
           // Position command for steering
+          // Negate for rear-steer: ackermann_steering_controller assumes front-steer
+          // geometry where +steering_angle = LEFT turn. For rear-steer, a positive
+          // steering angle causes RIGHT turn, so we negate to restore ROS convention
+          // (+angular.z = counterclockwise = LEFT turn).
           if (!msg->position.empty() && i < msg->position.size() &&
               !std::isnan(msg->position[i])) {
-            joint.cmd_position = msg->position[i];
+            joint.cmd_position = -msg->position[i];
           }
         }
         break;
@@ -247,8 +279,10 @@ void HardwareBridge::control_loop()
     double torque = 0.0;
 
     if (joint.is_traction) {
-      double velocity_error = joint.cmd_velocity - joint.state_velocity;
-      torque = joint.pid.compute(velocity_error, joint.state_velocity, dt);
+      // Convert m/s -> rad/s before PID to preserve tuned gains
+      double vel_error_rad = (joint.cmd_velocity - joint.state_velocity) / wheel_radius_;
+      double measurement_rad = joint.state_velocity / wheel_radius_;
+      torque = joint.pid.compute(vel_error_rad, measurement_rad, dt);
     } else {
       double position_error = joint.cmd_position - joint.state_position;
       torque = joint.pid.compute(position_error, joint.state_position, dt);
@@ -263,8 +297,9 @@ void HardwareBridge::control_loop()
     joint.plc_torque_raw = static_cast<int32_t>(
       std::llround(joint.state_effort * dir * PLC_TORQUE_SCALE));
     if (joint.is_traction) {
+      // Convert m/s -> rad/s for PLC speed limit register
       joint.plc_speed_limit = static_cast<uint32_t>(
-        std::abs(joint.cmd_velocity) * PLC_SPEED_LIMIT_SCALE);
+        std::abs(joint.cmd_velocity / wheel_radius_) * PLC_SPEED_LIMIT_SCALE);
     } else {
       joint.plc_pos_raw = static_cast<int32_t>(
         std::llround(joint.cmd_position * dir * PLC_POSITION_SCALE));
@@ -286,8 +321,14 @@ void HardwareBridge::control_loop()
 
     // Read back simulated feedback
     for (auto & joint : joints_) {
-      joint.state_position = virtual_plc_->getPosition(joint.axis_index);
-      joint.state_velocity = virtual_plc_->getVelocity(joint.axis_index);
+      if (joint.is_traction) {
+        // VirtualPLC operates in rad/s; convert to m/s at boundary
+        joint.state_velocity = virtual_plc_->getVelocity(joint.axis_index) * wheel_radius_;
+        joint.state_position += joint.state_velocity * dt;
+      } else {
+        joint.state_position = virtual_plc_->getPosition(joint.axis_index);
+        joint.state_velocity = virtual_plc_->getVelocity(joint.axis_index);
+      }
     }
 
     if (detailed_logging_) {
@@ -300,7 +341,7 @@ void HardwareBridge::control_loop()
         "Failed to write to hardware");
     }
 
-    if (!read_from_hardware()) {
+    if (!read_from_hardware(dt)) {
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
         "Failed to read from hardware");
     } else {
@@ -340,6 +381,7 @@ void HardwareBridge::handleEmergencyStop()
 
   for (auto & joint : joints_) {
     joint.cmd_velocity = 0.0;
+    joint.cmd_position = joint.state_position;  // Prevent steering jump on recovery
     joint.state_effort = 0.0;
     joint.pid.reset();
   }
@@ -402,8 +444,8 @@ bool HardwareBridge::write_to_hardware()
 
   for (const auto & joint : joints_) {
     if (joint.is_traction) {
-      // velocity -> speed_limit + torque
-      double speed = std::abs(joint.cmd_velocity);
+      // velocity (m/s) -> speed_limit (rad/s x scale) + torque
+      double speed = std::abs(joint.cmd_velocity / wheel_radius_);
       uint32_t speed_limit = static_cast<uint32_t>(speed * 100000.0);
       modbus_driver_->setTractionCommand(joint.axis_index, speed_limit, joint.state_effort);
     } else {
@@ -422,7 +464,7 @@ bool HardwareBridge::write_to_hardware()
 #endif
 
 #ifdef HAS_MODBUS
-bool HardwareBridge::read_from_hardware()
+bool HardwareBridge::read_from_hardware(double dt)
 {
   if (!modbus_driver_ || !modbus_driver_->isConnected()) {
     return false;
@@ -432,15 +474,14 @@ bool HardwareBridge::read_from_hardware()
     return false;
   }
 
-  double dt = (this->now() - last_control_time_).seconds();
   if (dt <= 0.0) {
     dt = 1.0 / control_rate_;
   }
 
   for (auto & joint : joints_) {
     if (joint.is_traction) {
-      joint.state_velocity = modbus_driver_->getTractionVelocity(joint.axis_index);
-      // Integrate velocity to estimate position (PLC doesn't provide traction position)
+      // PLC returns rad/s; convert to m/s at boundary
+      joint.state_velocity = modbus_driver_->getTractionVelocity(joint.axis_index) * wheel_radius_;
       joint.state_position += joint.state_velocity * dt;
     } else {
       double prev_position = joint.state_position;
@@ -455,7 +496,7 @@ bool HardwareBridge::read_from_hardware()
   return true;
 }
 #else
-bool HardwareBridge::read_from_hardware()
+bool HardwareBridge::read_from_hardware(double /*dt*/)
 {
   return false;
 }
@@ -468,7 +509,7 @@ void HardwareBridge::logControlPipeline(double dt)
   RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500,
     "\n"
     "──── Control Pipeline (dt=%.4f s) ── gear=%d ────\n"
-    "[CMD]   FR vel=%+8.3f rad/s   FL vel=%+8.3f rad/s\n"
+    "[CMD]   FR vel=%+8.3f m/s     FL vel=%+8.3f m/s\n"
     "        RR pos=%+8.4f rad     RL pos=%+8.4f rad\n"
     "[PID]   FR trq=%+8.2f Nm     FL trq=%+8.2f Nm\n"
     "        RR trq=%+8.2f Nm     RL trq=%+8.2f Nm\n"
@@ -476,9 +517,9 @@ void HardwareBridge::logControlPipeline(double dt)
     "        FL spd_lim=%8u  trq_raw=%+7d\n"
     "        RR pos_raw=%+8d trq_raw=%+7d\n"
     "        RL pos_raw=%+8d trq_raw=%+7d\n"
-    "        (spd_lim: |vel|x1e5  pos_raw: rad x1e4  trq_raw: Nm x dir x10 [x0.1%%rated])\n"
-    "[STATE] FR vel=%+8.3f rad/s  pos=%+8.3f rad\n"
-    "        FL vel=%+8.3f rad/s  pos=%+8.3f rad\n"
+    "        (spd_lim: |vel/r|x1e5  pos_raw: rad x1e4  trq_raw: Nm x dir x10 [x0.1%%rated])\n"
+    "[STATE] FR vel=%+8.3f m/s    pos=%+8.3f m\n"
+    "        FL vel=%+8.3f m/s    pos=%+8.3f m\n"
     "        RR vel=%+8.4f rad/s  pos=%+8.4f rad\n"
     "        RL vel=%+8.4f rad/s  pos=%+8.4f rad\n"
     "─────────────────────────────────────────────────",

@@ -35,6 +35,9 @@ hardware_bridge:
     steering_kd: 5.0
     max_steering_torque: 100.0    # Nm
 
+    # ── Wheel Geometry ───────────────────────────────────────────────────
+    wheel_radius: 0.1715          # meters - for m/s ↔ rad/s PLC conversion
+
     # ── PID Gains: Traction (Velocity Control) ─────────────────────────────
     traction_kp: 10.0
     traction_ki: 5.0
@@ -42,11 +45,15 @@ hardware_bridge:
     max_traction_torque: 150.0    # Nm
 
     # ── Virtual PLC Simulator ──────────────────────────────────────────────
+    #   Physics model: alpha = (torque - damping * velocity) / inertia
+    #   Must match raptorlift_hardware.cpp defaults for consistent sim behavior
     simulation:
       wheel_radius: 0.1715        # meters
       max_steering_angle: 0.7     # rad (~40 deg)
-      steering_time_constant: 0.1 # seconds
-      traction_time_constant: 0.05
+      steering_inertia: 0.5       # kg*m^2
+      traction_inertia: 0.08      # kg*m^2
+      steering_damping: 0.5       # N*m*s/rad
+      traction_damping: 1.0       # N*m*s/rad
 
     # ── Communication Watchdog (Compy Pattern) ─────────────────────────────
     comm_timeout: 1.0             # seconds - triggers e-stop if no PLC response

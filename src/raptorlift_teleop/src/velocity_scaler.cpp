@@ -118,7 +118,12 @@ void VelocityScaler::publish_timer_callback()
     // Apply gear scaling
     double gear_max_vel = calculate_gear_velocity();
     output_linear_x = input_linear_x_ * gear_max_vel;
-    output_angular_z = input_angular_z_ * max_angular_vel_;
+    // Scale angular velocity proportionally with gear velocity
+    // At low gears, steering angle limits constrain achievable omega
+    // omega_max = v * tan(max_steer) / wheelbase, but we use simple linear scaling
+    double gear_angular_scale = (max_linear_vel_ > 0.0) ? (gear_max_vel / max_linear_vel_) : 1.0;
+    double scaled_max_angular = max_angular_vel_ * gear_angular_scale;
+    output_angular_z = input_angular_z_ * scaled_max_angular;
   } else {
     // Timeout - stop
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,

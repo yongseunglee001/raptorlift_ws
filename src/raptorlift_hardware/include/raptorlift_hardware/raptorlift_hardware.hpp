@@ -18,6 +18,10 @@
 #include "raptorlift_hardware/pid_controller.hpp"
 #include "raptorlift_hardware/visibility_control.h"
 
+#ifdef HAS_MODBUS
+#include "raptorlift_hardware_bridge/modbus_driver.hpp"
+#endif
+
 namespace raptorlift_hardware
 {
 
@@ -43,6 +47,10 @@ public:
     const rclcpp_lifecycle::State & previous_state) override;
 
   RAPTORLIFT_HARDWARE_PUBLIC
+  hardware_interface::CallbackReturn on_error(
+    const rclcpp_lifecycle::State & previous_state) override;
+
+  RAPTORLIFT_HARDWARE_PUBLIC
   std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
 
   RAPTORLIFT_HARDWARE_PUBLIC
@@ -61,6 +69,7 @@ private:
   struct SteeringJoint
   {
     std::string name;
+    int axis_index{-1};       // PLC axis: RR=2, RL=3
     double cmd_position{0.0};
     double cmd_velocity{0.0};  // For ackermann_steering_controller compatibility
     double state_position{0.0};
@@ -69,13 +78,14 @@ private:
     PIDController pid;
   };
 
-  // Traction joint data (Velocity command -> Torque)
+  // Traction joint data (Velocity command [m/s] -> Torque)
   struct TractionJoint
   {
     std::string name;
-    double cmd_velocity{0.0};
-    double state_position{0.0};
-    double state_velocity{0.0};
+    int axis_index{-1};       // PLC axis: FR=0, FL=1
+    double cmd_velocity{0.0};   // m/s (wheel surface speed)
+    double state_position{0.0}; // meters (distance traveled)
+    double state_velocity{0.0}; // m/s (wheel surface speed)
     double state_effort{0.0};
     PIDController pid;
   };
@@ -105,16 +115,34 @@ private:
   double traction_damping_{1.0};
   double max_steering_angle_{0.7}; // rad (±40°)
 
+  // Wheel radius for m/s ↔ rad/s conversion at PLC boundary
+  // Joint velocity interface uses m/s; PLC uses rad/s
+  double wheel_radius_{0.1715};  // meters
+
   // Torques computed in write(), applied as dynamics in read()
   // (follows ros2_control convention: read→controller→write)
   std::vector<double> steering_torques_;
   std::vector<double> traction_torques_;
 
-  // Helper function to get parameter with default
+  // Modbus PLC communication (real hardware mode)
+#ifdef HAS_MODBUS
+  std::unique_ptr<raptorlift_hardware_bridge::RaptorLiftModbusDriver> modbus_driver_;
+#endif
+  std::string modbus_ip_{"192.168.2.1"};
+  int modbus_port_{502};
+
+  // PLC speed limit scale: |cmd_velocity| * 100000 -> PLC units
+  // (matches hardware_bridge.cpp line 407)
+  static constexpr double PLC_SPEED_LIMIT_SCALE = 100000.0;
+
+  // Helper: get parameter with default
   double getParameter(
     const hardware_interface::HardwareInfo & info,
     const std::string & name,
     double default_value) const;
+
+  // Helper: map joint name to PLC axis index (FR=0, FL=1, RR=2, RL=3)
+  static int getAxisIndex(const std::string & joint_name);
 };
 
 }  // namespace raptorlift_hardware

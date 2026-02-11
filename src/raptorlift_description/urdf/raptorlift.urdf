@@ -12,11 +12,17 @@
       Front (Fork side, +X) = Traction wheels (구동륜)
       Rear (Counterweight side, -X) = Steering wheels (조향륜)
 
-    Axis Convention (ROS Standard):
-      All wheels: axis xyz="0 1 0" (+Y)
-      Right wheels: joint origin rpy="0 0 3.1416" (180° Z rotation)
-      => This makes +velocity = forward for both sides
-         while keeping TF frames properly oriented
+    Axis Convention:
+      Traction wheels:
+        Left:  axis xyz="0 1 0" (+Y), no origin rotation
+        Right: axis xyz="0 -1 0" (-Y), origin rpy="0 0 3.1416" (180° Z)
+        => +velocity = forward for both sides
+
+      Steering wheels (REAR-STEER):
+        Both:  axis xyz="0 0 1" (+Z), no origin rotation
+        => +position = counterclockwise (LEFT steer) for both sides
+        => Hardware layer negates controller output for rear-steer inversion
+        => ROS convention: +angular.z → LEFT turn (counterclockwise)
   -->
 
   <!-- Materials -->
@@ -138,7 +144,7 @@
     <parent link="base_link"/>
     <child link="rear_left_steering_link"/>
     <origin xyz="-0.52235 0.355 -0.0705" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
+    <axis xyz="0 0 1"/>  <!-- +Z: hardware negates for rear-steer; +angular.z → LEFT turn (ROS convention) -->
     <limit lower="-0.7" upper="0.7" effort="100" velocity="1.0"/>
     <dynamics damping="0.5" friction="0.5"/>
   </joint>
@@ -170,7 +176,7 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
-  <!-- Rear Right Steering - 180° Z rotation -->
+  <!-- Rear Right Steering (NO 180° Z rotation — Z-axis revolute cannot be compensated via Z rotation) -->
   <link name="rear_right_steering_link">
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -181,8 +187,8 @@
   <joint name="rear_right_steering_joint" type="revolute">
     <parent link="base_link"/>
     <child link="rear_right_steering_link"/>
-    <origin xyz="-0.52235 -0.355 -0.0705" rpy="0 0 3.1416"/>
-    <axis xyz="0 0 1"/>
+    <origin xyz="-0.52235 -0.355 -0.0705" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>  <!-- +Z: hardware negates for rear-steer; +angular.z → LEFT turn (ROS convention) -->
     <limit lower="-0.7" upper="0.7" effort="100" velocity="1.0"/>
     <dynamics damping="0.5" friction="0.5"/>
   </joint>
@@ -354,6 +360,8 @@
       <param name="joint_states_topic">/raptorlift/joint_states</param>
       <param name="trigger_joint_command_threshold">0.001</param>
       <param name="sum_wrapped_joint_states">true</param>
+      <!-- Used by raptorlift_hardware plugin for m/s ↔ rad/s PLC conversion -->
+      <param name="wheel_radius">0.1715</param>
     </hardware>
 
     <!-- Steering joints (Position + Velocity command) - Rear wheels -->

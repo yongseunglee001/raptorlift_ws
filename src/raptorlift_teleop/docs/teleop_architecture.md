@@ -48,7 +48,9 @@ ros2 launch raptorlift_bringup raptorlift.launch.py simulation_mode:=false
 ros2 launch raptorlift_bringup raptorlift.launch.py use_hardware_bridge:=false
 
 # 키보드 조종 추가 (별도 터미널)
-ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/key/cmd_vel
+# stamped:=true 필수 — twist_mux가 TwistStamped만 수신 (use_stamped: true)
+ros2 run teleop_twist_keyboard teleop_twist_keyboard \
+  --ros-args -r cmd_vel:=/key/cmd_vel -p stamped:=true -p frame_id:=base_link
 
 # Teleop 없이 실행 (Nav2 전용)
 ros2 launch raptorlift_bringup raptorlift.launch.py use_teleop:=false
@@ -291,6 +293,8 @@ ros2 topic echo /gear_state
 
 ### 키보드 입력이 안 됨
 
+- `stamped:=true` 파라미터 필수 — twist_mux가 `use_stamped: true`로 TwistStamped만 수신
+- `frame_id:=base_link` 파라미터 추가 (stamped 사용 시 필수)
 - `/key/cmd_vel` 토픽으로 리맵했는지 확인
 - twist_mux에서 keyboard 우선순위가 gamepad보다 낮음 (50 < 100)
 - 게임패드 입력이 없을 때만 키보드가 활성화됨

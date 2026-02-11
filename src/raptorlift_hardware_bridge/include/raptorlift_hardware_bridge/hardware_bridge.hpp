@@ -19,81 +19,14 @@
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "std_msgs/msg/int32.hpp"
 
+#include "raptorlift_hardware_bridge/pid_controller.hpp"
+
 #ifdef HAS_MODBUS
 #include "raptorlift_hardware_bridge/modbus_driver.hpp"
 #endif
 
 namespace raptorlift_hardware_bridge
 {
-
-/**
- * @brief Simple PID controller for motor control
- */
-class PIDController
-{
-public:
-  PIDController() = default;
-
-  void setGains(double kp, double ki, double kd)
-  {
-    kp_ = kp;
-    ki_ = ki;
-    kd_ = kd;
-  }
-
-  void setLimits(double min_output, double max_output)
-  {
-    min_output_ = min_output;
-    max_output_ = max_output;
-  }
-
-  /**
-   * @brief Compute PID output
-   * @param error Current error (setpoint - measurement)
-   * @param measurement Current measurement (for derivative-on-measurement to avoid kick)
-   * @param dt Time step
-   */
-  double compute(double error, double measurement, double dt)
-  {
-    if (dt <= 0.0) {
-      return 0.0;
-    }
-
-    integral_ += error * dt;
-
-    // Anti-windup
-    integral_ = std::clamp(integral_, -max_integral_, max_integral_);
-
-    // Derivative on measurement (not error) to avoid derivative kick
-    double derivative = -(measurement - prev_measurement_) / dt;
-    prev_measurement_ = measurement;
-
-    double output = kp_ * error + ki_ * integral_ + kd_ * derivative;
-    return std::clamp(output, min_output_, max_output_);
-  }
-
-  // Legacy overload for backward compatibility
-  double compute(double error, double dt)
-  {
-    return compute(error, -error, dt);  // approximation when measurement unavailable
-  }
-
-  void reset()
-  {
-    integral_ = 0.0;
-    prev_measurement_ = 0.0;
-  }
-
-private:
-  double kp_{0.0};
-  double ki_{0.0};
-  double kd_{0.0};
-  double integral_{0.0};
-  double prev_measurement_{0.0};
-  double min_output_{-100.0};
-  double max_output_{100.0};
-  double max_integral_{50.0};
-};
 
 /**
  * @brief Per-axis joint data (matches axis indices FR=0, FL=1, RR=2, RL=3)
@@ -104,10 +37,10 @@ struct JointData
   int axis_index{-1};       // Index into driver's axis array
   bool is_traction{false};   // true=traction(velocity), false=steering(position)
 
-  double cmd_position{0.0};
-  double cmd_velocity{0.0};
-  double state_position{0.0};
-  double state_velocity{0.0};
+  double cmd_position{0.0};  // steering: rad
+  double cmd_velocity{0.0};  // traction: m/s (wheel surface speed)
+  double state_position{0.0}; // traction: meters, steering: rad
+  double state_velocity{0.0}; // traction: m/s, steering: rad/s
   double state_effort{0.0};
   PIDController pid;
 
@@ -121,6 +54,11 @@ struct JointData
  * @brief Virtual PLC simulator for simulation mode
  *
  * Simulates 4-axis PLC behavior: 2 traction + 2 steering.
+ * Uses proper physics model matching raptorlift_hardware.cpp:
+ *   acceleration = (torque - damping * velocity) / inertia
+ *
+ * Traction axes operate in rad/s internally; the bridge converts to m/s
+ * at the boundary. Steering axes operate in rad directly.
  */
 class VirtualPLCSimulator
 {
@@ -128,7 +66,24 @@ public:
   static constexpr int NUM_AXES = 4;
   static constexpr double MAX_STEERING_ANGLE = 0.7;
 
-  VirtualPLCSimulator() = default;
+  /**
+   * @brief Construct with physics parameters
+   * @param steering_inertia  kg*m^2 (default 0.5)
+   * @param traction_inertia  kg*m^2 (default 0.08)
+   * @param steering_damping  N*m*s/rad (default 0.5)
+   * @param traction_damping  N*m*s/rad (default 1.0)
+   */
+  explicit VirtualPLCSimulator(
+    double steering_inertia = 0.5,
+    double traction_inertia = 0.08,
+    double steering_damping = 0.5,
+    double traction_damping = 1.0)
+  : steering_inertia_(steering_inertia)
+  , traction_inertia_(traction_inertia)
+  , steering_damping_(steering_damping)
+  , traction_damping_(traction_damping)
+  {
+  }
 
   void setTractionTorque(int axis_index, double torque)
   {
@@ -150,25 +105,27 @@ public:
       return;
     }
 
-    // Traction axes (FR=0, FL=1): torque -> velocity
+    // Traction axes (FR=0, FL=1): torque -> velocity (rad/s internally)
     for (int i = 0; i < 2; i++) {
-      double acceleration = traction_torques_[i] * 0.1;
-      velocities_[i] += acceleration * dt;
-      velocities_[i] *= 0.98;  // Damping
+      double alpha = (traction_torques_[i] - traction_damping_ * velocities_[i])
+                     / traction_inertia_;
+      velocities_[i] += alpha * dt;
       positions_[i] += velocities_[i] * dt;
-      // Wrap position
-      while (positions_[i] > M_PI) { positions_[i] -= 2 * M_PI; }
-      while (positions_[i] < -M_PI) { positions_[i] += 2 * M_PI; }
+      // No wrapping -- position accumulates (bridge converts to meters externally)
     }
 
-    // Steering axes (RR=2, RL=3): torque -> position
+    // Steering axes (RR=2, RL=3): torque -> position (rad)
     for (int i = 2; i < NUM_AXES; i++) {
-      double acceleration = steering_torques_[i] * 0.01;
-      velocities_[i] += acceleration * dt;
-      velocities_[i] *= 0.95;  // Damping
+      double alpha = (steering_torques_[i] - steering_damping_ * velocities_[i])
+                     / steering_inertia_;
+      velocities_[i] += alpha * dt;
       positions_[i] += velocities_[i] * dt;
       positions_[i] = std::clamp(
         positions_[i], -MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
+      // Zero velocity at hard stops to prevent snap-back overshoot
+      if (std::abs(positions_[i]) >= MAX_STEERING_ANGLE) {
+        velocities_[i] = 0.0;
+      }
     }
   }
 
@@ -190,6 +147,12 @@ public:
   }
 
 private:
+  // Physics parameters
+  double steering_inertia_{0.5};    // kg*m^2
+  double traction_inertia_{0.08};   // kg*m^2
+  double steering_damping_{0.5};    // N*m*s/rad
+  double traction_damping_{1.0};    // N*m*s/rad
+
   std::array<double, NUM_AXES> positions_{};
   std::array<double, NUM_AXES> velocities_{};
   std::array<double, NUM_AXES> traction_torques_{};
@@ -218,7 +181,7 @@ private:
   void initialize_joints();
   bool initialize_modbus();
   bool write_to_hardware();
-  bool read_from_hardware();
+  bool read_from_hardware(double dt);
   void checkCommunicationTimeout();
   void handleEmergencyStop();
   bool attemptReconnect();
@@ -262,6 +225,9 @@ private:
   double traction_kp_, traction_ki_, traction_kd_;
   double max_steering_torque_;
   double max_traction_torque_;
+
+  // Wheel radius for m/s ↔ rad/s conversion at PLC boundary
+  double wheel_radius_{0.1715};  // meters
 
   // Motor mounting directions: FR=+1, FL=-1, RR=+1, RL=-1 (must match modbus_driver)
   static constexpr int MOTOR_DIRS[4] = {+1, -1, +1, -1};

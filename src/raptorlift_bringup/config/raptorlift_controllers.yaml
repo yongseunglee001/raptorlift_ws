@@ -40,7 +40,8 @@ ackermann_steering_controller:
 
     # Geometry parameters (meters)
     wheelbase: 1.0                    # Distance between front and rear axles
-    traction_wheels_radius: 0.1715    # Traction wheel radius (front wheels)
+    traction_wheels_radius: 1.0       # Effective radius=1.0 makes joint velocity = m/s (surface speed)
+    # Real wheel_radius (0.1715m) handled in hardware plugin for PLC rad/s conversion
     traction_track_width: 0.71        # Distance between left and right traction wheels
     steering_track_width: 0.71        # Distance between left and right steering wheels
 
